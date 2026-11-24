@@ -71,7 +71,7 @@ internal static class ServerHooks
 		if (!args.ContinueExecution) return;
 		if (!Netplay.Disconnect)
 		{
-			if (client.IsActive)
+			if (client.Status != RemoteClient.ConnStatus.Free)
 			{
 				_hookManager.InvokeServerLeave(client.Id);
 			}
