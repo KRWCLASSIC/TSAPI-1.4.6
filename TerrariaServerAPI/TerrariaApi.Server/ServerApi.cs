@@ -125,6 +125,55 @@ namespace TerrariaApi.Server
 			AppDomain.CurrentDomain.AssemblyResolve += CurrentDomain_AssemblyResolve;
 
 			LoadPlugins();
+			EnsureGnsTransportAvailable();
+		}
+
+		internal static void EnsureGnsTransportAvailable()
+		{
+			if (!Netplay.UseGNS)
+			{
+				LogWriter.ServerWriteLine("GNS (UDP crossplay) transport disabled.", TraceLevel.Info);
+				return;
+			}
+
+			if (System.Runtime.InteropServices.NativeLibrary.TryLoad("GNS_Wrapper", typeof(Netplay).Assembly, null, out _))
+				return;
+
+			string fileName = OperatingSystem.IsWindows() ? "GNS_Wrapper.dll" : OperatingSystem.IsMacOS() ? "libGNS_Wrapper.dylib" : "libGNS_Wrapper.so";
+			string arch = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+			string os = OperatingSystem.IsWindows() ? "win" : OperatingSystem.IsMacOS() ? "osx" : "linux";
+			string[] candidates = new[] { Environment.CurrentDirectory, AppContext.BaseDirectory }
+				.Distinct()
+				.SelectMany(dir => new[]
+				{
+					Path.Combine(dir, fileName),
+					Path.Combine(dir, "runtimes", $"{os}-{arch}", "native", fileName),
+					Path.Combine(dir, "..", "runtimes", $"{os}-{arch}", "native", fileName),
+				})
+				.ToArray();
+
+			string? error = null;
+			foreach (string candidate in candidates)
+			{
+				if (!File.Exists(candidate))
+					continue;
+				try
+				{
+					var handle = System.Runtime.InteropServices.NativeLibrary.Load(candidate);
+					System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(typeof(Netplay).Assembly, (name, asm, path) =>
+						name == "GNS_Wrapper" ? handle : IntPtr.Zero);
+					return;
+				}
+				catch (Exception ex)
+				{
+					error = ex.Message;
+				}
+			}
+
+			Netplay.UseGNS = false;
+			LogWriter.ServerWriteLine(
+				"GNS_Wrapper native library could not be loaded" + (error is null ? "" : $" ({error})") +
+				". UDP crossplay transport is disabled; clients can still join over TCP.", TraceLevel.Warning);
 		}
 
 		internal static void DeInitialize()
